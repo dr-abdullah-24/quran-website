@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initActiveNavLinks();
   initTickerClone();
   initCurrentYear();
+  initCoursePricing();
 });
 
 /* ════════════════════════════════════════════════
@@ -585,4 +586,54 @@ function initTickerClone() {
 function initCurrentYear() {
   const el = $('#current-year');
   if (el) el.textContent = new Date().getFullYear();
+}
+
+/* ════════════════════════════════════════════════
+   12. COURSE PRICING — currency by visitor location
+════════════════════════════════════════════════ */
+function initCoursePricing() {
+  const priceEls = $$('.course-price[data-pkr]');
+  if (!priceEls.length) return;
+
+  // EU member states (currency: EUR)
+  const EU = new Set([
+    'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE',
+    'IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'
+  ]);
+
+  function applyCurrency(code) {
+    const key =
+      code === 'PK' ? 'pkr' :
+      code === 'GB' ? 'gbp' :
+      EU.has(code)  ? 'eur' :
+                      'usd';
+    priceEls.forEach(el => {
+      const next = el.dataset[key];
+      if (next) el.textContent = next;
+    });
+  }
+
+  // Cache in sessionStorage so we don't hit the API on every page view
+  const cached = (() => {
+    try { return sessionStorage.getItem('visitor-country'); } catch { return null; }
+  })();
+
+  if (cached) {
+    applyCurrency(cached);
+    return;
+  }
+
+  // Free IP geolocation — no key required
+  fetch('https://ipapi.co/json/')
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+      const code = (data && data.country_code) ? data.country_code.toUpperCase() : '';
+      if (code) {
+        try { sessionStorage.setItem('visitor-country', code); } catch {}
+        applyCurrency(code);
+      }
+    })
+    .catch(() => {
+      // Fallback: leave the default PKR text in place
+    });
 }
