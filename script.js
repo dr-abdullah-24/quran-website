@@ -613,9 +613,10 @@ function initCoursePricing() {
     });
   }
 
-  // Cache in sessionStorage so we don't hit the API on every page view
+  // sessionStorage cache — bumped key to invalidate any prior bad lookup
+  const CACHE_KEY = 'visitor-country-v2';
   const cached = (() => {
-    try { return sessionStorage.getItem('visitor-country'); } catch { return null; }
+    try { return sessionStorage.getItem(CACHE_KEY); } catch { return null; }
   })();
 
   if (cached) {
@@ -623,17 +624,29 @@ function initCoursePricing() {
     return;
   }
 
-  // Free IP geolocation — no key required
-  fetch('https://ipapi.co/json/')
-    .then(r => r.ok ? r.json() : Promise.reject(r.status))
-    .then(data => {
-      const code = (data && data.country_code) ? data.country_code.toUpperCase() : '';
-      if (code) {
-        try { sessionStorage.setItem('visitor-country', code); } catch {}
-        applyCurrency(code);
-      }
-    })
-    .catch(() => {
-      // Fallback: leave the default PKR text in place
-    });
+  // Try several free, key-less geo APIs in order. First one that returns a
+  // 2-letter country wins. Each one is wrapped so a failure falls to the next.
+  const providers = [
+    { url: 'https://api.country.is/',       pick: d => d && d.country },
+    { url: 'https://ipwho.is/',             pick: d => d && d.success !== false && d.country_code },
+    { url: 'https://ipapi.co/json/',        pick: d => d && d.country_code },
+    { url: 'https://get.geojs.io/v1/ip/country.json', pick: d => d && d.country }
+  ];
+
+  (async () => {
+    for (const p of providers) {
+      try {
+        const res = await fetch(p.url, { cache: 'no-store' });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const code = (p.pick(data) || '').toString().toUpperCase();
+        if (code && /^[A-Z]{2}$/.test(code)) {
+          try { sessionStorage.setItem(CACHE_KEY, code); } catch {}
+          applyCurrency(code);
+          return;
+        }
+      } catch { /* try next provider */ }
+    }
+    // All providers failed — leave the default PKR text in place.
+  })();
 }
